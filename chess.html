@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>체스 게임 vs AI</title>
+    <!-- 체스 규칙 및 이동 검증용 라이브러리 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #1e1e1e; color: #fff; margin-top: 20px; }
+        #status { font-size: 18px; margin: 15px 0; color: #f1c40f; font-weight: bold; }
+        
+        /* 직접 그린 체스판 스타일 */
+        #board {
+            display: grid;
+            grid-template-columns: repeat(8, 60px);
+            grid-template-rows: repeat(8, 60px);
+            width: 480px;
+            height: 480px;
+            margin: 20px auto;
+            border: 4px solid #444;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+        }
+        .square {
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 38px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .light { background-color: #f0d9b5; }
+        .dark { background-color: #b58863; }
+        .selected { background-color: #7b61ff !important; }
+        
+        .btn { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #3498db; color: white; border: none; border-radius: 5px; font-weight: bold; }
+        .btn:hover { background: #2980b9; }
+
+        #promotion-modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 100;
+        }
+        .modal-content { background: #2c3e50; padding: 25px; border-radius: 12px; text-align: center; }
+        .promo-btn { font-size: 28px; margin: 8px; padding: 10px 18px; cursor: pointer; background: #34495e; border: 2px solid #bdc3c7; border-radius: 8px; color: white; }
+        .promo-btn:hover { background: #e67e22; }
+    </style>
+</head>
+<body>
+
+    <h1>⚔️ 체스 게임 vs AI</h1>
+    <div id="status">백(당신)의 차례입니다.</div>
+    <div id="board"></div>
+    <br>
+    <button class="btn" onclick="resetGame()">새 게임 시작</button>
+
+    <div id="promotion-modal">
+        <div class="modal-content">
+            <p>어떤 기물로 승진하시겠습니까?</p>
+            <button class="promo-btn" onclick="selectPromotion('q')">♕ 퀸</button>
+            <button class="promo-btn" onclick="selectPromotion('r')">♖ 룩</button>
+            <button class="promo-btn" onclick="selectPromotion('b')">♗ 비숍</button>
+            <button class="promo-btn" onclick="selectPromotion('n')">♘ 나이트</button>
+        </div>
+    </div>
+
+    <script>
+        const game = new Chess();
+        let selectedSquare = null;
+        let pendingMove = null;
+
+        const pieceSymbols = {
+            p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚',
+            P: '♙', R: '♖', N: '♘', B: '♗', Q: '♕', K: '♔'
+        };
+
+        const pieceValues = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
+
+        function drawBoard() {
+            const boardEl = document.getElementById("board");
+            boardEl.innerHTML = "";
+            const boardState = game.board();
+
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const squareEl = document.createElement("div");
+                    const isLight = (r + c) % 2 === 0;
+                    squareEl.className = `square ${isLight ? 'light' : 'dark'}`;
+                    
+                    const file = String.fromCharCode(97 + c);
+                    const rank = 8 - r;
+                    const squareId = file + rank;
+                    squareEl.dataset.square = squareId;
+
+                    if (selectedSquare === squareId) {
+                        squareEl.classList.add('selected');
+                    }
+
+                    const piece = boardState[r][c];
+                    if (piece) {
+                        const symbolKey = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
+                        squareEl.textContent = pieceSymbols[symbolKey];
+                    }
+
+                    squareEl.addEventListener("click", () => handleSquareClick(squareId));
+                    boardEl.appendChild(squareEl);
+                }
+            }
+        }
+
+        function handleSquareClick(squareId) {
+            if (game.game_over() || game.turn() !== 'w') return;
+
+            if (!selectedSquare) {
+                const piece = game.get(squareId);
+                if (piece && piece.color === 'w') {
+                    selectedSquare = squareId;
+                    drawBoard();
+                }
+            } else {
+                const source = selectedSquare;
+                const target = squareId;
+                selectedSquare = null;
+
+                // 프로모션 체크
+                const piece = game.get(source);
+                const isPromotion = (piece && piece.type === 'p' && piece.color === 'w' && target[1] === '8');
+
+                if (isPromotion) {
+                    pendingMove = { from: source, to: target };
+                    document.getElementById("promotion-modal").style.display = "flex";
+                    drawBoard();
+                    return;
+                }
+
+                const move = game.move({ from: source, to: target, promotion: 'q' });
+                if (move === null) {
+                    // 유효하지 않은 이동이면 새로 선택 시도
+                    const newPiece = game.get(target);
+                    if (newPiece && newPiece.color === 'w') {
+                        selectedSquare = target;
+                    }
+                }
+
+                drawBoard();
+
+                if (game.game_over()) {
+                    updateGameStatus();
+                } else {
+                    window.setTimeout(makeEngineMove, 300);
+                }
+            }
+        }
+
+        function selectPromotion(pieceType) {
+            document.getElementById("promotion-modal").style.display = "none";
+            game.move({ from: pendingMove.from, to: pendingMove.to, promotion: pieceType });
+            pendingMove = null;
+            drawBoard();
+
+            if (game.game_over()) {
+                updateGameStatus();
+            } else {
+                window.setTimeout(makeEngineMove, 300);
+            }
+        }
+
+        function evaluateBoard(boardObj) {
+            let total = 0;
+            const boardState = boardObj.board();
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const piece = boardState[r][c];
+                    if (piece) {
+                        const val = pieceValues[piece.type];
+                        total += (piece.color === 'w') ? val : -val;
+                    }
+                }
+            }
+            return total;
+        }
+
+        function minimax(gameObj, depth, alpha, beta, maximizing) {
+            if (depth === 0 || gameObj.game_over()) {
+                return [evaluateBoard(gameObj), null];
+            }
+
+            const legalMoves = gameObj.moves({ verbose: true });
+            let bestMove = legalMoves[0];
+
+            if (maximizing) {
+                let maxEval = -Infinity;
+                for (let i = 0; i < legalMoves.length; i++) {
+                    gameObj.move(legalMoves[i]);
+                    const eval = minimax(gameObj, depth - 1, alpha, beta, false)[0];
+                    gameObj.undo();
+                    if (eval > maxEval) {
+                        maxEval = eval;
+                        bestMove = legalMoves[i];
+                    }
+                    alpha = Math.max(alpha, eval);
+                    if (beta <= alpha) break;
+                }
+                return [maxEval, bestMove];
+            } else {
+                let minEval = Infinity;
+                for (let i = 0; i < legalMoves.length; i++) {
+                    gameObj.move(legalMoves[i]);
+                    const eval = minimax(gameObj, depth - 1, alpha, beta, true)[0];
+                    gameObj.undo();
+                    if (eval < minEval) {
+                        minEval = eval;
+                        bestMove = legalMoves[i];
+                    }
+                    beta = Math.min(beta, eval);
+                    if (beta <= alpha) break;
+                }
+                return [minEval, bestMove];
+            }
+        }
+
+        function makeEngineMove() {
+            if (game.game_over()) return;
+
+            document.getElementById("status").textContent = "AI가 수를 고민 중입니다...";
+
+            setTimeout(() => {
+                const bestMove = minimax(game, 2, -Infinity, Infinity, false)[1];
+                if (bestMove) {
+                    game.move(bestMove);
+                }
+                drawBoard();
+
+                if (game.game_over()) {
+                    updateGameStatus();
+                } else {
+                    document.getElementById("status").textContent = "백(당신)의 차례입니다.";
+                }
+            }, 300);
+        }
+
+        function updateGameStatus() {
+            let statusText = "게임 종료!";
+            if (game.in_checkmate()) {
+                statusText = game.turn() === 'w' ? "체크메이트! AI(흑)의 승리입니다." : "체크메이트! 당신(백)의 승리입니다!";
+            } else if (game.in_draw()) {
+                statusText = "무승부입니다!";
+            }
+            document.getElementById("status").textContent = statusText;
+        }
+
+        function resetGame() {
+            game.reset();
+            selectedSquare = null;
+            pendingMove = null;
+            drawBoard();
+            document.getElementById("status").textContent = "백(당신)의 차례입니다.";
+        }
+
+        // 초기 실행
+        drawBoard();
+    </script>
+</body>
+</html>
