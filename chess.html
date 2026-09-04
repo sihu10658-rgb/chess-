@@ -3,13 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <title>체스 게임 vs AI</title>
-    <!-- 체스 규칙 및 이동 검증용 라이브러리 -->
+    <!-- 체스 규칙 엔진 라이브러리 딱 하나만 로드 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #1e1e1e; color: #fff; margin-top: 20px; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; text-align: center; background: #1e1e1e; color: #fff; margin-top: 20px; }
         #status { font-size: 18px; margin: 15px 0; color: #f1c40f; font-weight: bold; }
         
-        /* 직접 그린 체스판 스타일 */
         #board {
             display: grid;
             grid-template-columns: repeat(8, 60px);
@@ -26,10 +25,12 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 38px;
+            font-size: 42px; /* 기물 크기 조금 더 키움 */
             cursor: pointer;
             user-select: none;
+            transition: background-color 0.2s; /* 호버 애니메이션 추가 */
         }
+        .square:hover { filter: brightness(1.1); }
         .light { background-color: #f0d9b5; }
         .dark { background-color: #b58863; }
         .selected { background-color: #7b61ff !important; }
@@ -54,6 +55,7 @@
     <br>
     <button class="btn" onclick="resetGame()">새 게임 시작</button>
 
+    <!-- 프로모션 팝업창 -->
     <div id="promotion-modal">
         <div class="modal-content">
             <p>어떤 기물로 승진하시겠습니까?</p>
@@ -73,14 +75,13 @@
             p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚',
             P: '♙', R: '♖', N: '♘', B: '♗', Q: '♕', K: '♔'
         };
-
         const pieceValues = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
 
-        function drawBoard() {
+        // [최적화 1] 처음에만 DOM 요소를 생성하는 초기화 함수
+        function initBoardUI() {
             const boardEl = document.getElementById("board");
-            boardEl.innerHTML = "";
-            const boardState = game.board();
-
+            boardEl.innerHTML = ""; // 딱 한 번만 비움
+            
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const squareEl = document.createElement("div");
@@ -90,65 +91,104 @@
                     const file = String.fromCharCode(97 + c);
                     const rank = 8 - r;
                     const squareId = file + rank;
+                    
+                    squareEl.id = `sq-${squareId}`; // 요소 업데이트를 위해 ID 부여
                     squareEl.dataset.square = squareId;
-
-                    if (selectedSquare === squareId) {
-                        squareEl.classList.add('selected');
-                    }
-
-                    const piece = boardState[r][c];
-                    if (piece) {
-                        const symbolKey = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
-                        squareEl.textContent = pieceSymbols[symbolKey];
-                    }
-
                     squareEl.addEventListener("click", () => handleSquareClick(squareId));
                     boardEl.appendChild(squareEl);
                 }
             }
         }
 
+        // [최적화 2] 기존 요소의 내용(텍스트, 클래스)만 변경하는 업데이트 함수
+        function updateBoardUI() {
+            const boardState = game.board();
+            
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const file = String.fromCharCode(97 + c);
+                    const rank = 8 - r;
+                    const squareId = file + rank;
+                    const squareEl = document.getElementById(`sq-${squareId}`);
+                    
+                    // 선택된 칸 하이라이트 처리
+                    if (selectedSquare === squareId) {
+                        squareEl.classList.add('selected');
+                    } else {
+                        squareEl.classList.remove('selected');
+                    }
+
+                    // 기물 유니코드 렌더링
+                    const piece = boardState[r][c];
+                    if (piece) {
+                        const symbolKey = piece.color === 'w' ? piece.type.toUpperCase() : piece.type;
+                        squareEl.textContent = pieceSymbols[symbolKey];
+                    } else {
+                        squareEl.textContent = "";
+                    }
+                }
+            }
+        }
+
+        // [최적화 3] 클릭 UX 다듬기
         function handleSquareClick(squareId) {
             if (game.game_over() || game.turn() !== 'w') return;
 
+            const pieceClicked = game.get(squareId);
+
+            // 1. 아무것도 안 골랐을 때
             if (!selectedSquare) {
-                const piece = game.get(squareId);
-                if (piece && piece.color === 'w') {
-                    selectedSquare = squareId;
-                    drawBoard();
+                if (pieceClicked && pieceClicked.color === 'w') {
+                    selectedSquare = squareId; // 내 기물이면 선택
+                    updateBoardUI();
                 }
-            } else {
-                const source = selectedSquare;
-                const target = squareId;
-                selectedSquare = null;
+                return;
+            }
 
-                // 프로모션 체크
-                const piece = game.get(source);
-                const isPromotion = (piece && piece.type === 'p' && piece.color === 'w' && target[1] === '8');
+            // 2. 이미 무언가 골랐을 때
+            if (selectedSquare === squareId) {
+                selectedSquare = null; // 같은 거 또 누르면 취소
+                updateBoardUI();
+                return;
+            }
 
-                if (isPromotion) {
+            if (pieceClicked && pieceClicked.color === 'w') {
+                selectedSquare = squareId; // 내 다른 기물 누르면 선택 변경
+                updateBoardUI();
+                return;
+            }
+
+            // 3. 이동 시도 (목적지 클릭)
+            const source = selectedSquare;
+            const target = squareId;
+            
+            // 프로모션인지 확인
+            const piece = game.get(source);
+            const isPromotion = (piece && piece.type === 'p' && target[1] === '8');
+
+            if (isPromotion) {
+                // 가능한 이동인지 가짜로 둬봐서 검증
+                const testMoves = game.moves({ verbose: true });
+                const isValid = testMoves.some(m => m.from === source && m.to === target);
+                
+                if (isValid) {
                     pendingMove = { from: source, to: target };
                     document.getElementById("promotion-modal").style.display = "flex";
-                    drawBoard();
-                    return;
                 }
+                return;
+            }
 
-                const move = game.move({ from: source, to: target, promotion: 'q' });
-                if (move === null) {
-                    // 유효하지 않은 이동이면 새로 선택 시도
-                    const newPiece = game.get(target);
-                    if (newPiece && newPiece.color === 'w') {
-                        selectedSquare = target;
-                    }
-                }
-
-                drawBoard();
-
-                if (game.game_over()) {
-                    updateGameStatus();
-                } else {
-                    window.setTimeout(makeEngineMove, 300);
-                }
+            // 일반 이동 처리
+            const move = game.move({ from: source, to: target, promotion: 'q' });
+            
+            if (move !== null) { // 유효한 이동 성공!
+                selectedSquare = null;
+                updateBoardUI();
+                checkGameState();
+            } else {
+                // 이동할 수 없는 곳을 누르면 선택 취소
+                selectedSquare = null;
+                updateBoardUI();
             }
         }
 
@@ -156,12 +196,18 @@
             document.getElementById("promotion-modal").style.display = "none";
             game.move({ from: pendingMove.from, to: pendingMove.to, promotion: pieceType });
             pendingMove = null;
-            drawBoard();
+            selectedSquare = null;
+            updateBoardUI();
+            checkGameState();
+        }
 
+        function checkGameState() {
             if (game.game_over()) {
-                updateGameStatus();
-            } else {
-                window.setTimeout(makeEngineMove, 300);
+                updateStatusText();
+            } else if (game.turn() === 'b') {
+                document.getElementById("status").textContent = "AI가 수를 고민 중입니다...";
+                // 브라우저 렌더링(UI 업데이트)할 시간을 벌어주기 위해 setTimeout 사용
+                window.setTimeout(makeEngineMove, 100); 
             }
         }
 
@@ -194,12 +240,9 @@
                     gameObj.move(legalMoves[i]);
                     const eval = minimax(gameObj, depth - 1, alpha, beta, false)[0];
                     gameObj.undo();
-                    if (eval > maxEval) {
-                        maxEval = eval;
-                        bestMove = legalMoves[i];
-                    }
+                    if (eval > maxEval) { maxEval = eval; bestMove = legalMoves[i]; }
                     alpha = Math.max(alpha, eval);
-                    if (beta <= alpha) break;
+                    if (beta <= alpha) break; // 가지치기
                 }
                 return [maxEval, bestMove];
             } else {
@@ -208,10 +251,7 @@
                     gameObj.move(legalMoves[i]);
                     const eval = minimax(gameObj, depth - 1, alpha, beta, true)[0];
                     gameObj.undo();
-                    if (eval < minEval) {
-                        minEval = eval;
-                        bestMove = legalMoves[i];
-                    }
+                    if (eval < minEval) { minEval = eval; bestMove = legalMoves[i]; }
                     beta = Math.min(beta, eval);
                     if (beta <= alpha) break;
                 }
@@ -221,30 +261,26 @@
 
         function makeEngineMove() {
             if (game.game_over()) return;
-
-            document.getElementById("status").textContent = "AI가 수를 고민 중입니다...";
-
-            setTimeout(() => {
-                const bestMove = minimax(game, 2, -Infinity, Infinity, false)[1];
-                if (bestMove) {
-                    game.move(bestMove);
-                }
-                drawBoard();
-
-                if (game.game_over()) {
-                    updateGameStatus();
-                } else {
-                    document.getElementById("status").textContent = "백(당신)의 차례입니다.";
-                }
-            }, 300);
+            
+            // depth 2~3 설정 (3 이상은 브라우저 렉 유발 가능)
+            const bestMove = minimax(game, 2, -Infinity, Infinity, false)[1];
+            if (bestMove) game.move(bestMove);
+            
+            updateBoardUI();
+            
+            if (game.game_over()) {
+                updateStatusText();
+            } else {
+                document.getElementById("status").textContent = "백(당신)의 차례입니다.";
+            }
         }
 
-        function updateGameStatus() {
+        function updateStatusText() {
             let statusText = "게임 종료!";
             if (game.in_checkmate()) {
-                statusText = game.turn() === 'w' ? "체크메이트! AI(흑)의 승리입니다." : "체크메이트! 당신(백)의 승리입니다!";
+                statusText = game.turn() === 'w' ? "체크메이트! AI(흑)의 승리입니다 ㅠㅠ" : "체크메이트! 당신(백)의 승리입니다!! 🎉";
             } else if (game.in_draw()) {
-                statusText = "무승부입니다!";
+                statusText = "무승부입니다! 🤝";
             }
             document.getElementById("status").textContent = statusText;
         }
@@ -253,12 +289,13 @@
             game.reset();
             selectedSquare = null;
             pendingMove = null;
-            drawBoard();
+            updateBoardUI();
             document.getElementById("status").textContent = "백(당신)의 차례입니다.";
         }
 
-        // 초기 실행
-        drawBoard();
+        // --- 프로그램 최초 진입점 ---
+        initBoardUI();   // 체스판 껍데기를 먼저 만들고
+        updateBoardUI(); // 기물을 세팅
     </script>
 </body>
 </html>
